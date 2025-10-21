@@ -1,0 +1,60 @@
+name: CI/CD – Python app
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+# avoid overlapping runs on the same branch
+concurrency:
+  group: python-app-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Run tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run tests (pytest)
+        run: pytest -q
+
+  deploy:
+    name: Deploy (Render)
+    needs: test
+    if: ${{ success() }} # only deploy when tests passed
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Trigger Render Deploy Hook
+        env:
+          RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
+        run: |
+          if [ -z "$RENDER_DEPLOY_HOOK" ]; then
+            echo "Missing secret RENDER_DEPLOY_HOOK"
+            exit 1
+          fi
+          # trigger a new deploy on Render
+          curl -fsS -X POST "$RENDER_DEPLOY_HOOK"
+          echo "Deploy hook sent."
